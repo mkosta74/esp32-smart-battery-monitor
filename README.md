@@ -18,19 +18,28 @@ Features:
 
 ### Simple Schematic
 
-ESP32               Smart Battery Connector
-GPIO21 (SDA) ----+---- SDA (Clock pin, usually pin 3-4 on 9-pin connector)
-                 |
-                4.7kΩ
-                 |
-                3.3VGPIO22 (SCL) ----+---- SCL (Data pin)
-                 |
-                4.7kΩ
-                 |
-                3.3VGND ---------------- GND (outer pins)+5V (VIN) --------- External power (do NOT connect to battery +)
+ESP32-WROOM (default I2C pins GPIO21,GPIO22)
+------------------------------
 
-Typical laptop battery pinout (9-pin):  
-++ [gap] SCL SDA [unknown/Therm] GND GND  
+![ESP32 Diagram](images/ESP32-pinout.jpg)
+
+Important Notes:
+- ESP32 is 3.3V logic – do NOT connect to 5V!
+- Power ESP32 separately (USB or external 5V to VIN) – do NOT use battery power pins for ESP32 power.
+- 8-pin battery connectors vary! Common layout (viewed from battery contacts, pin 1 left):
+
+Common Battery connector pins 
+------------------------------
+
+![Battery Pinout](images/battery-pinout.jpg)
+
+
+Connect:
+- ESP32 GPIO21 (SDA) → Battery SDA pin
+- ESP32 GPIO22 (SCL) → Battery SCL pin
+- ESP32 GND → Battery GND pin
+
+Safety first: Test continuity, no shorts to power pins!
 
 **Warning**: Identify pins carefully! Wrong connection can damage BMS. Use multimeter/scope.
 
@@ -46,13 +55,10 @@ If no WiFi: Connect to "BatteryMonitor" hotspot (pw: 12345678), open 192.168.4.1
 ## Screenshots
 ![Dashboard Example 1](images/Screenshot1.png)
 ![Dashboard Example 2](images/Screenshot2.png)
-![Hardware Setup](images/hardware_setup.jpg)
-![Connection Diagram](images/connection_diagram.jpg)
-![Battery Pinout](images/battery_pinout.jpg)
 
 ## Notes
-- Individual cell voltages not supported on all packs (including BQ29312-based).
-- Tested on SMP TD06055 pack.
+- Individual cell voltages still not working (testing needed)
+- Tested on: HSTNN-IB28, HSTNN-UB68, SS03XL
 
 Enjoy your portable smart battery reader!
 
