@@ -44,7 +44,7 @@ Typical laptop battery pinout (9-pin):
 If no WiFi: Connect to "BatteryMonitor" hotspot (pw: 12345678), open 192.168.4.1
 
 ## Screenshots
-![Dashboard Example 1](Screenshot 2025-12-15 at 11.05.03.png)
+![Dashboard Example 1](images/Screenshot 1.png)
 ![Dashboard Example 2](images/dashboard2.png)
 ![Hardware Setup](images/hardware_setup.jpg)
 ![Connection Diagram](images/connection_diagram.jpg)
