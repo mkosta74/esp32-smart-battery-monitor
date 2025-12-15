@@ -44,7 +44,7 @@ Safety first: Test continuity, no shorts to power pins!
 **Warning**: Identify pins carefully! Wrong connection can damage BMS. Use multimeter/scope.
 
 ## Setup
-1. Install libraries: ESPAsyncWebServer, AsyncTCP (latest from GitHub)
+1. Install libraries: ESPAsyncWebServer, AsyncTCP (latest from GitHub by ESP32Async)
 2. Edit WiFi credentials in code
 3. Upload to ESP32
 4. Open Serial Monitor for IP and JSON logs
