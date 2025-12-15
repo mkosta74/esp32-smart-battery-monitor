@@ -45,7 +45,7 @@ If no WiFi: Connect to "BatteryMonitor" hotspot (pw: 12345678), open 192.168.4.1
 
 ## Screenshots
 ![Dashboard Example 1](images/Screenshot1.png)
-![Dashboard Example 1](images/Screenshot2.png)
+![Dashboard Example 2](images/Screenshot2.png)
 ![Hardware Setup](images/hardware_setup.jpg)
 ![Connection Diagram](images/connection_diagram.jpg)
 ![Battery Pinout](images/battery_pinout.jpg)
