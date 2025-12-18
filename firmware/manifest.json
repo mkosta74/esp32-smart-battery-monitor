@@ -1,0 +1,18 @@
+{
+    "name": "My ESP32 Project",
+    "version": "1.0",
+    "improv": true,
+    "builds":
+    [
+        {
+            "chipFamily": "ESP32",
+            "parts":
+            [
+                {
+                    "path": "https://github.com/mkosta74/esp32-smart-battery-monitor/firmware/firmware.bin",
+                    "offset": 0
+                }
+            ]
+        }
+    ]
+}
