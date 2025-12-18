@@ -9,7 +9,7 @@
             "parts":
             [
                 {
-                    "path": "https://github.com/mkosta74/esp32-smart-battery-monitor/firmware/firmware.bin",
+                    "path": "firmware.bin",
                     "offset": 0
                 }
             ]
