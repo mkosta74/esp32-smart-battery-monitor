@@ -1,5 +1,5 @@
 {
-    "name": "My ESP32 Project",
+    "name": "ESP32 Smart Battery Monitor",
     "version": "1.0",
     "improv": true,
     "builds":
