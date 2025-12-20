@@ -53,6 +53,11 @@ Use online flashing tool (in Google Chrome or Microsoft Edge):
 
 https://mkosta74.github.io/esp32-smart-battery-monitor/
 
+- connect your device to USB (while holding "boot")
+- click connect button, on page
+- follow instructions to flash and setup wifi connection
+- visit device once done.
+
 ## Screenshots
 ![Main Page](images/main-page.png)
 ![Advanced Page](images/advanced-page.png)
@@ -60,6 +65,7 @@ https://mkosta74.github.io/esp32-smart-battery-monitor/
 ## Notes
 - ~~Individual cell voltages still not working (testing needed)~~ Working!
 - Tested on: HSTNN-IB28, HSTNN-UB68, SS03XL
+- Added graphing for SoC, voltage and current.
 - Advanced page with some scaning tools
 - unseal attempt, maybe...
 
