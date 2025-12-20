@@ -1,15 +1,14 @@
 #include <WiFi.h>
+#include <ImprovWiFiLibrary.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Wire.h>
 
-const char* sta_ssid     = "YOUR_WIFI_SSID";
-const char* sta_password = "YOUR_WIFI_PASSWORD";
-
-const char* ap_ssid = "BatteryMonitor";         // AP mode SSID
-const char* ap_password = "12345678";           // AP password (min 8 chars)
 
 const unsigned long wifiTimeout = 15000;        // 15 seconds timeout
+
+bool serverStarted = false;  // Flag to track if server has been started
+
 
 AsyncWebServer server(80);
 const uint8_t BATTERY_ADDR = 0x0B;  // Try 0x16 if no response
@@ -197,6 +196,10 @@ String decodeBatteryStatus(uint16_t status) {
   if (status & 0x0040) flags += "<span class='badge bg-secondary'>DISCHARGING</span> ";
   if (status & 0x0020) flags += "<span class='badge bg-success'>FULLY_CHARGED</span> ";
   if (status & 0x0010) flags += "<span class='badge bg-danger'>FULLY_DISCHARGED</span> ";
+  if (status & 0x0008) flags += "<span class='badge bg-info'>EC3</span> ";
+  if (status & 0x0004) flags += "<span class='badge bg-info'>EC2</span> ";
+  if (status & 0x0002) flags += "<span class='badge bg-info'>EC1</span> ";
+  if (status & 0x0001) flags += "<span class='badge bg-info'>EC0</span> ";
   if (flags == "") flags = "<span class='badge bg-light text-dark'>OK</span>";
   return flags;
 }
@@ -234,10 +237,10 @@ void updateBatteryData() {
 
 
   // In updateBatteryData(), replace cell reading with:
-  bat.cell1 = readExtendedWord(CELL_VOLT_1);
-  bat.cell2 = readExtendedWord(CELL_VOLT_2);
-  bat.cell3 = readExtendedWord(CELL_VOLT_3);
-  bat.cell4 = readExtendedWord(CELL_VOLT_4);
+  bat.cell1 = readWord(CELL_VOLT_1);
+  bat.cell2 = readWord(CELL_VOLT_2);
+  bat.cell3 = readWord(CELL_VOLT_3);
+  bat.cell4 = readWord(CELL_VOLT_4);
   delay(50);
 }
 
@@ -289,27 +292,48 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESP32 Advanced Smart Battery Monitor</title>
+  <title>ESP32 Smart Battery Monitor</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body { background: #f8f9fa; padding: 20px 0; }
+    :root {
+      --bg-color: #f8f9fa;
+      --card-bg: #ffffff;
+      --text-color: #212529;
+      --border-color: #dee2e6;
+      --gauge-fill: #28a745;
+      --gauge-empty: #e9ecef;
+    }
+    
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-color: #121212;
+        --card-bg: #1e1e1e;
+        --text-color: #e0e0e0;
+        --border-color: #333333;
+        --gauge-fill: #28a745;
+        --gauge-empty: #2d2d2d;
+      }
+      body { background-color: var(--bg-color); color: var(--text-color); }
+      .card { background-color: var(--card-bg); border-color: var(--border-color); color: var(--text-color); }
+      .text-muted { color: #aaaaaa !important; }
+    }
+    
+    body { background-color: var(--bg-color); color: var(--text-color); padding: 20px 0; transition: background 0.3s, color 0.3s; }
+    .card { background-color: var(--card-bg); border: 1px solid var(--border-color); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
     .gauge-container { position: relative; width: 260px; height: 160px; margin: 0 auto; }
     .gauge { width: 100%; height: 100%; }
-    .soc-text { position: absolute; top: 52%; left: 50%; transform: translate(-50%, -50%); font-size: 3rem; font-weight: bold; }
-    .badge { margin: 2px; }
-        /* Add cell card styles */
+    .soc-text { position: absolute; top: 52%; left: 50%; transform: translate(-50%, -50%); font-size: 3rem; font-weight: bold; color: var(--text-color); }
     .cell-card { text-align: center; padding: 15px; border-radius: 10px; color: white; }
     .cell-green { background: #28a745; }
     .cell-yellow { background: #ffc107; color: black; }
     .cell-red { background: #dc3545; }
     .cell-na { background: #6c757d; }
-
   </style>
 </head>
 <body>
   <div class="container">
-    <h1 class="text-center mb-5 text-primary">Advanced Smart Battery Monitor</h1>
+    <h1 class="text-center mb-5 text-primary">Smart Battery Monitor</h1>
 
     <div class="row g-4 mb-5">
       <div class="col-lg-4 col-md-6">
@@ -319,7 +343,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             <canvas id="socGauge"></canvas>
             <div id="socText" class="soc-text">--%</div>
           </div>
-          <small class="text-muted mt-2">Health: <span id="health">--</span>% | Max Error: <span id="maxError">--</span>%</small>
+          <small class="text-muted mt-2">Health: <span id="health">--</span>% | Error: <span id="maxError">--</span>%</small>
         </div>
       </div>
 
@@ -336,7 +360,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="row mb-4">
-      <div class="col-md-6">
+      <div class="col-md-2">
         <div class="card shadow p-4">
           <h5>Battery Details</h5>
           Manufacturer: <span id="manufacturer">--</span><br>
@@ -346,13 +370,20 @@ const char index_html[] PROGMEM = R"rawliteral(
           Serial: <span id="serialNumber">--</span>
         </div>
       </div>
-      <div class="col-md-6">
+      <div class="col-md-2">
         <div class="card shadow p-4">
           <h5>Battery Status Flags</h5>
           <div id="statusFlags">Loading...</div>
         </div>
       </div>
+      <div class="col-md-8">
+        <div class="card shadow p-4">
+          <h5>Battery History (Last Hour)</h5>
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
     </div>
+
     <!-- New Cell Voltages Section -->
     <h3 class="mb-3 mt-5">Individual Cell Voltages</h3>
     <div class="row g-3 mb-5">
@@ -392,7 +423,11 @@ const char index_html[] PROGMEM = R"rawliteral(
       <div class="col-md-3 col-sm-6"><div class="card shadow p-3 text-center"><h6>Req. Chg I</h6><h5 id="chargingCurrent">--</h5> mA</div></div>
     </div>
 
-    <div class="text-center text-muted small">Auto-updates every 5s • JSON logged to Serial</div>
+    <div class="text-center mt-5">
+      <a href="/advanced" class="btn btn-secondary">Advanced scan tools</a>
+    </div>
+
+    <div class="text-center text-muted small">Auto-updates every 5s • Dark mode follows OS setting</div>
   </div>
 
   <script>
@@ -400,17 +435,32 @@ const char index_html[] PROGMEM = R"rawliteral(
     var createGauge = function() {
       gauge = new Chart(document.getElementById('socGauge'), {
         type: 'doughnut',
-        data: { datasets: [{ data: [0, 100], backgroundColor: ['#28a745', '#e9ecef'], borderWidth: 0 }] },
+        data: { datasets: [{ data: [0, 100], backgroundColor: [getComputedStyle(document.documentElement).getPropertyValue('--gauge-fill'), getComputedStyle(document.documentElement).getPropertyValue('--gauge-empty')], borderWidth: 0 }] },
         options: { cutout: '75%', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } } }
       });
     };
     createGauge();
 
+    const ctx = document.getElementById('historyChart').getContext('2d');
+    const historyChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [
+        { label: 'SOC %', data: [], borderColor: '#28a745', yAxisID: 'y' },
+        { label: 'Voltage V', data: [], borderColor: '#007bff', yAxisID: 'y1' },
+        { label: 'Current mA', data: [], borderColor: '#dc3545', yAxisID: 'y1' }
+      ]},
+      options: { scales: { y: { position: 'left' }, y1: { position: 'right' } } }
+    });
+
     var updateData = function() {
+
+
+
+
       function updateCell(cardId, valueId, voltage) {
         const card = document.getElementById(cardId);
         const valEl = document.getElementById(valueId);
-        if (voltage === null || voltage < 2.5) {
+        if (voltage === null || voltage < 2.5 || voltage > 10) {
           valEl.innerText = '--';
           card.className = 'card shadow cell-card cell-na';
         } else {
@@ -429,7 +479,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('full').innerText = d.full;
         document.getElementById('cycles').innerText = d.cycles;
         document.getElementById('runtimeEmpty').innerText = d.runtimeEmpty;
-        document.getElementById('timeToFull').innerText = (d.timeToFull == 0 ? 'N/A' : d.timeToFull);
+        document.getElementById('timeToFull').innerText = d.timeToFull == 0 ? 'N/A' : d.timeToFull;
         document.getElementById('health').innerText = (d.health === null ? '--' : (d.health / 10).toFixed(1));
         document.getElementById('maxError').innerText = d.maxError;
         document.getElementById('manufacturer').innerText = d.manufacturer;
@@ -442,71 +492,459 @@ const char index_html[] PROGMEM = R"rawliteral(
         document.getElementById('chargingCurrent').innerText = d.chargingCurrent;
         document.getElementById('chargingVoltage').innerText = d.chargingVoltage;
         document.getElementById('statusFlags').innerHTML = d.statusFlags;
-        updateCell('cell1Card', 'cell1', d.cell1 === null ? null : d.cell1);
-        updateCell('cell2Card', 'cell2', d.cell2 === null ? null : d.cell2);
-        updateCell('cell3Card', 'cell3', d.cell3 === null ? null : d.cell3);
-        updateCell('cell4Card', 'cell4', d.cell4 === null ? null : d.cell4);
         document.getElementById('socText').innerText = d.soc + '%';
         gauge.data.datasets[0].data = [d.soc, 100 - d.soc];
         gauge.data.datasets[0].backgroundColor[0] = d.soc > 30 ? '#28a745' : (d.soc > 10 ? '#ffc107' : '#dc3545');
         gauge.update();
-      });
+        updateCell('cell1Card', 'cell1', d.cell1);
+        updateCell('cell2Card', 'cell2', d.cell2);
+        updateCell('cell3Card', 'cell3', d.cell3);
+        updateCell('cell4Card', 'cell4', d.cell4);
+
+        // Push new data point with timestamp
+        historyChart.data.labels.push(new Date().toLocaleTimeString());
+        historyChart.data.datasets[0].data.push(d.soc);
+        historyChart.data.datasets[1].data.push(d.voltage);
+        historyChart.data.datasets[2].data.push(d.current);
+        if (historyChart.data.labels.length > 600) {  // Keep last 60 points
+          historyChart.data.labels.shift();
+          historyChart.data.datasets.forEach(ds => ds.data.shift());
+        }
+        historyChart.update();
+
+      }).catch(() => {});
     };
-    setInterval(updateData, 5000);
+
+
+    setInterval(updateData, 3000);
     updateData();
   </script>
 </body>
 </html>
 )rawliteral";
 
-void setupWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(sta_ssid, sta_password);
-  
-  Serial.print("Connecting to WiFi");
-  
-  unsigned long startAttemptTime = millis();
-  
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < wifiTimeout) {
-    delay(500);
-    Serial.print(".");
+const char advanced_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Advanced SMBus Tools</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { --bg-color: #f8f9fa; --card-bg: #ffffff; --text-color: #212529; --border-color: #dee2e6; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg-color: #121212; --card-bg: #1e1e1e; --text-color: #e0e0e0; --border-color: #333333; }
+      body { background-color: var(--bg-color); color: var(--text-color); }
+      .card, .form-control, .form-select, table { background-color: var(--card-bg); border-color: var(--border-color); color: var(--text-color); }
+      .table { --bs-table-bg: var(--card-bg); }
+      .form-control::placeholder { color: #aaa; }
+    }
+    body { background-color: var(--bg-color); color: var(--text-color); padding: 20px 0; }
+    .card { background-color: var(--card-bg); border: 1px solid var(--border-color); }
+    pre, table { background: #2d2d2d; color: #f8f8f2; border-radius: 6px; }
+    .btn-primary { margin-top: 10px; }
+    #batchProgress { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="text-center mb-4 text-primary">Advanced SMBus Tools</h1>
+    <p class="text-center text-muted mb-5">Scanner • Single Command • Batch Range • Use carefully!</p>
+
+    <div class="row g-4 mb-4">
+      <!-- I2C Scanner -->
+      <div class="col-lg-4">
+        <div class="card shadow p-4">
+          <h4>I2C Bus Scanner</h4>
+          <button class="btn btn-warning w-100" onclick="scanI2C()">Scan Bus</button>
+          <pre id="scanResult" class="mt-3">Click Scan to begin...</pre>
+        </div>
+           <!-- New: Read Extended Word -->
+        <div class="card shadow p-4">
+          <h4>Read Extended Word</h4>
+          <div class="mb-3">
+            <label class="form-label">Battery Address (hex)</label>
+            <input type="text" onchange="readExtendedWord()" class="form-control" id="wordAddr" value="0B">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Subcommand (hex)</label>
+            <input type="text" onchange="readExtendedWord()" class="form-control" id="wordSubcmd" value="0001" placeholder="e.g. 0001 Device Type">
+          </div>
+          <button class="btn btn-info w-100" onclick="readExtendedWord()">Read Word</button>
+          <pre id="wordResult" class="mt-3 flex-grow-1">Result will appear here...</pre>
+        </div>        
+      </div>
+
+      <!-- Single Command -->
+      <div class="col-lg-4">
+        <div class="card shadow p-4">
+          <h4>Single Command</h4>
+          <input type="text" onchange="sendSingle()" class="form-control mb-2" id="singleAddr" value="0B" placeholder="Address (hex)">
+          <input type="text" onchange="sendSingle()" class="form-control mb-2" id="singleCmd" value="23" placeholder="Command (hex)">
+          <select class="form-select mb-3" id="singleType">
+            <option value="block">Block</option>
+            <option value="word">Word</option>
+            <option value="auto">Auto</option>
+          </select>
+          <button class="btn btn-primary w-100" onclick="sendSingle()">Send</button>
+          <pre id="singleResult" class="mt-3">Result appears here</pre>
+        </div>
+      </div>
+      <!-- Unseal Battery with Verification -->
+      <div class="col-lg-4">
+        <div class="card shadow p-4 h-100 warning-card">
+          <h4 class="text-danger">⚠ Unseal Battery (bq2084)</h4>
+          <p class="small text-muted">Default key: 0x0414 → 0x3672<br>Then full access 0xFFFF → 0xFFFF</p>
+          <button class="btn btn-danger w-100 mb-3" onclick="unsealAndVerify()">Attempt Unseal + Verify</button>
+          <pre id="unsealResult" class="mt-3 flex-grow-1">Status: Ready</pre>
+          <div id="verifyStatus" class="mt-3 text-center fw-bold"></div>
+        </div>
+      </div>
+      </div>
+      </div>
+    <div class="row g-4 mb-4">
+      <!-- Batch Range -->
+      <div class="col-12">
+        <div class="card shadow p-4">
+          <h4>Batch Command Range</h4>
+          <input type="text" class="form-control mb-2" id="batchAddr" value="0B" placeholder="Address (hex)">
+          <div class="row">
+            <div class="col">
+              <input type="text" class="form-control mb-2" id="startCmd" value="00" placeholder="Start (hex)">
+            </div>
+            <div class="col">
+              <input type="text" class="form-control mb-2" id="endCmd" value="30" placeholder="End (hex)">
+            </div>
+          </div>
+          <div class="progress mb-3" id="batchProgress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%"></div>
+          </div>
+          <button class="btn btn-success w-100" onclick="sendBatch()">Scan Range</button>
+          <div id="batchResult" class="mt-3" style="overflow-y: auto;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-center mt-5">
+      <a href="/" class="btn btn-secondary">← Back to Dashboard</a>
+    </div>
+  </div>
+
+<script>
+  let baseline = null;  // Stores first scan results: {cmd: {hex, dec, str}}
+
+
+  // Known ManufacturerInfo block decoding (13 bytes, TI bq20zxx/bq30zxx series)
+  function decodeManufacturerInfo(hexString) {
+    // Remove spaces and convert to array of bytes
+    let bytes = hexString.trim().split(/\s+/).map(b => parseInt(b, 16));
+    if (bytes.length !== 13 && bytes.length !== 10) return "Invalid length (expected 13 bytes)";
+
+    let packLot    = (bytes[0] << 8) | bytes[1];   // bytes 0-1
+    let pcbLot     = (bytes[2] << 8) | bytes[3];   // bytes 2-3
+    let firmware   = bytes[4];
+    let hardware   = bytes[5];
+    let cellRev    = bytes[6];
+    let partialRes = bytes[7];
+    let fullRes    = bytes[8];
+    let wdtRes     = bytes[9];
+    let checksum   = (bytes[11] << 8) | bytes[12]; // bytes 11-12
+
+    let html = `
+      <table class="table table-sm table-bordered mt-3">
+        <thead class="table-dark"><tr><th>Field</th><th>Value</th></tr></thead>
+        <tbody class="table-dark">
+          <tr><td>Pack Lot Code</td><td>${packLot}</td></tr>
+          <tr><td>PCB Lot Code</td><td>${pcbLot}</td></tr>
+          <tr><td>Firmware Version</td><td>${firmware}</td></tr>
+          <tr><td>Hardware Revision</td><td>${hardware}</td></tr>
+          <tr><td>Cell Revision</td><td>${cellRev}</td></tr>
+          <tr><td>Partial Reset Counter</td><td>${partialRes}</td></tr>
+          <tr><td>Full Reset Counter</td><td>${fullRes}</td></tr>
+          <tr><td>Watchdog Reset Counter</td><td>${wdtRes}</td></tr>
+          <tr><td>Checksum</td><td>0x${checksum.toString(16).toUpperCase().padStart(4,'0')}</td></tr>
+        </tbody>
+      </table>`;
+
+    return html;
   }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi Connected!");
-    Serial.print("IP Address: http://");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nWiFi connection failed. Starting AP mode...");
-    
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ap_ssid, ap_password);
-    
-    Serial.println("Access Point started");
-    Serial.print("AP SSID: ");
-    Serial.println(ap_ssid);
-    Serial.print("AP Password: ");
-    Serial.println(ap_password);
-    Serial.print("AP IP Address: http://");
-    Serial.println(WiFi.softAPIP());
+
+  // Auto-detect and decode ManufacturerInfo when response contains 13-byte block
+  function tryDecodeManufacturerInfo(responseText) {
+    // Look for hex line like "Hex: 06 75 0A B0 ..."
+    let hexMatch = responseText.match(/Hex:\s*([0-9A-F\s]+)/i);
+    if (hexMatch) {
+      let hexLine = hexMatch[1];
+      let byteCount = hexLine.trim().split(/\s+/).length;
+      if (byteCount === 13 || byteCount === 10) {
+        return decodeManufacturerInfo(hexLine);
+      }
+    }
+    return null;
   }
+
+  // Update single result display with decoding
+  function displaySingleResult(text) {
+    let decoded = tryDecodeManufacturerInfo(text);
+    if (decoded) {
+      document.getElementById('singleResult').innerHTML = 
+        `<pre>${text}</pre><div class="mt-3"><strong>Decoded Manufacturer Info:</strong>${decoded}</div>`;
+    } else {
+      document.getElementById('singleResult').innerText = text;
+    }
+  }
+
+
+  function scanI2C() {
+    document.getElementById('scanResult').innerText = 'Scanning...';
+    fetch('/scan').then(r => r.text()).then(t => {
+      document.getElementById('scanResult').innerText = t;
+    });
+  }
+
+  function sendSingle() {
+        let addr = parseInt(document.getElementById('singleAddr').value, 16);
+        let cmd = parseInt(document.getElementById('singleCmd').value, 16);
+        let type = document.getElementById('singleType').value;
+        if (isNaN(addr) || isNaN(cmd)) return alert("Invalid hex");
+
+        document.getElementById('singleResult').innerText = 'Sending...';
+        fetch(`/cmd?addr=${addr}&command=${cmd}&type=${type}`)
+        .then(r => r.text())
+        .then(t => displaySingleResult(t))
+        .catch(() => document.getElementById('singleResult').innerText = 'Error');
+    }
+
+
+
+        // New: Read Extended Word function
+    function readExtendedWord() {
+      let addr = parseInt(document.getElementById('wordAddr').value, 16);
+      let subcmd = parseInt(document.getElementById('wordSubcmd').value, 16);
+      if (isNaN(addr) || isNaN(subcmd)) return alert("Invalid hex value");
+
+      document.getElementById('wordResult').innerText = 'Reading...';
+      fetch(`/cmd?addr=${addr}&command=00&subcmd=${subcmd.toString(16).padStart(4,'0')}&type=word`)
+        .then(r => r.text())
+        .then(t => {
+          if (t.includes('Word Response')) {
+            document.getElementById('wordResult').innerHTML = '<strong>' + t + '</strong>';
+          } else {
+            document.getElementById('wordResult').innerText = t;
+          }
+        })
+        .catch(() => document.getElementById('wordResult').innerText = 'Error');
+    }
+
+  async function sendBatch() {
+    let addr = parseInt(document.getElementById('batchAddr').value, 16);
+    let start = parseInt(document.getElementById('startCmd').value, 16);
+    let end = parseInt(document.getElementById('endCmd').value, 16);
+    if (isNaN(addr) || isNaN(start) || isNaN(end) || start > end) return alert("Invalid range");
+
+    let resultDiv = document.getElementById('batchResult');
+    let progressBar = document.getElementById('batchProgress').querySelector('.progress-bar');
+    document.getElementById('batchProgress').style.display = 'block';
+    
+    // Header with Clear button
+    resultDiv.innerHTML = `
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5>Batch Results (Addr 0x${addr.toString(16).toUpperCase().padStart(2,'0')})</h5>
+        <button class="btn btn-sm btn-outline-danger" onclick="baseline=null; this.closest('div').nextElementSibling.remove();">Clear Baseline</button>
+      </div>
+      <table class="table table-sm table-striped">
+        <thead class="table-dark"><tr><th>Cmd</th><th>Hex</th><th>Dec</th><th>String</th><th>Change</th></tr></thead>
+        <tbody class="table-dark"></tbody>
+      </table>`;
+    
+    let tbody = resultDiv.querySelector('tbody');
+    let total = end - start + 1;
+    let count = 0;
+
+    let current = {};
+
+    for (let cmd = start; cmd <= end; cmd++) {
+      let response = await fetch(`/cmd?addr=${addr}&command=${cmd}&type=auto`).then(r => r.text());
+
+      let row = tbody.insertRow();
+      row.insertCell(0).textContent = '0x' + cmd.toString(16).toUpperCase().padStart(2,'0');
+
+      let hexCell = row.insertCell(1);
+      let decCell = row.insertCell(2);
+      let strCell = row.insertCell(3);
+      let changeCell = row.insertCell(4);
+
+      let hex = '';
+      let dec = 0;
+      let str = '';
+
+      if (response.includes('Word Response')) {
+        hex = response.match(/0x([0-9A-F]+)/i)[1];
+        dec = parseInt(hex, 16);
+        hexCell.textContent = '0x' + hex;
+        decCell.textContent = dec;
+      } else if (response.includes('Block Length')) {
+        str = response.split('String: ')[1]?.trim() || '';
+        strCell.textContent = str;
+      } else {
+        hexCell.textContent = response;
+      }
+
+      current[cmd] = {hex, dec, str};
+
+      // Change detection
+      if (baseline && baseline[cmd]) {
+        let old = baseline[cmd];
+        if (dec !== old.dec) {
+          let diff = dec - old.dec;
+          changeCell.innerHTML = `<span style="color:${diff > 0 ? 'lime' : 'red'}; font-weight:bold;">${diff > 0 ? '↑' : '↓'} ${Math.abs(diff)}</span>`;
+          row.style.backgroundColor = diff > 0 ? 'rgba(0,255,0,0.1)' : 'rgba(255,0,0,0.1)';
+        } else if (str !== old.str) {
+          changeCell.innerHTML = '<span style="color:orange; font-weight:bold;">≠</span>';
+          row.style.backgroundColor = 'rgba(255,165,0,0.1)';
+        } else {
+          changeCell.textContent = '—';
+        }
+      } else {
+        changeCell.textContent = baseline ? '?' : '—';  // First run
+      }
+
+      count++;
+      progressBar.style.width = (count / total * 100) + '%';
+    }
+
+    // Save as baseline if none exists
+    if (!baseline) {
+      baseline = current;
+      resultDiv.querySelector('h5').insertAdjacentHTML('beforeend', ' <span class="badge bg-success">Baseline Set</span>');
+    }
+
+    progressBar.style.width = '100%';
+    setTimeout(() => document.getElementById('batchProgress').style.display = 'none', 1000);
+  }
+
+  function clearBaseline() {
+    baseline = null;
+  }
+    // NEW: Unseal function
+    function unsealBattery() {
+      let addr = parseInt(document.getElementById('singleAddr').value, 16);
+      document.getElementById('unsealResult').innerText = 'Sending unseal sequence...';
+
+      // Step 1: Unseal key part 1 (0x0414)
+      fetch(`/unseal?addr=${addr}&step=1`)
+        .then(r => r.text())
+        .then(t => {
+          document.getElementById('unsealResult').innerText += '\n' + t;
+          // Step 2: Unseal key part 2 (0x3672)
+          return fetch(`/unseal?addr=${addr}&step=2`);
+        })
+        .then(r => r.text())
+        .then(t => {
+          document.getElementById('unsealResult').innerText += '\n' + t;
+          // Step 3: Full access (0xFFFF x2)
+          return fetch(`/unseal?addr=${addr}&step=full`);
+        })
+        .then(r => r.text())
+        .then(t => {
+          document.getElementById('unsealResult').innerText += '\n' + t + '\n\nUnseal sequence complete!';
+        })
+        .catch(() => {
+          document.getElementById('unsealResult').innerText += '\nError during sequence';
+        });
+    }
+
+function unsealAndVerify() {
+  let addr = parseInt(document.getElementById('singleAddr').value, 16);
+
+  let resultBox = document.getElementById('unsealResult');
+  let verifyBox = document.getElementById('verifyStatus');
+  
+  resultBox.innerText = 'Starting unseal sequence...\n';
+  verifyBox.innerHTML = '';
+
+  // Step 1: Unseal part 1
+  fetch(`/unseal?addr=${addr}&step=1`)
+    .then(r => r.text())
+    .then(t => {
+      resultBox.innerText += t + '\n';
+      // Step 2: Unseal part 2
+      return fetch(`/unseal?addr=${addr}&step=2`);
+    })
+    .then(r => r.text())
+    .then(t => {
+      resultBox.innerText += t + '\n';
+      // Step 3: Full access
+      return fetch(`/unseal?addr=${addr}&step=full`);
+    })
+    .then(r => r.text())
+    .then(t => {
+      resultBox.innerText += t + '\n\nUnseal sequence complete!\n\nVerifying unsealed state...';
+      
+      // Verification: Read OperationStatus (0x0054) — only works when unsealed
+      return fetch(`/cmd?addr=${addr}&command=00&subcmd=0054`);
+    })
+    .then(r => r.text())
+    .then(resp => {
+      if (resp.includes('Word Response') || resp.includes('Block')) {
+        verifyBox.innerHTML = '<span style="color:lime;font-size:1.2em;">✓ UNSEALED SUCCESSFULLY!</span><br><small>OperationStatus accessible</small>';
+        resultBox.innerText += '\n\nVerification: ' + resp;
+      } else {
+        verifyBox.innerHTML = '<span style="color:red;font-size:1.2em;">✗ STILL SEALED</span><br><small>No access to restricted data</small>';
+        resultBox.innerText += '\n\nVerification failed: ' + resp;
+      }
+    })
+    .catch(err => {
+      resultBox.innerText += '\nError during process: ' + err;
+      verifyBox.innerHTML = '<span style="color:orange;">Verification failed (network error)</span>';
+    });
 }
 
+  window.onload = scanI2C;
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+
+ImprovWiFi improvSerial(&Serial);
+
+void onImprovWiFiConnectedCb(const char *ssid, const char *password)
+{
+  // Save ssid and password here
+  WiFi.persistent(true); 
+
+  server.begin();
+  serverStarted = true;
+
+}
 
 void setup() {
+
+    // Optional: Set device info (shows in browser during setup)
+  improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32, "My-Device-9a4c2b", "2.1.5", "My Device");
+
+  improvSerial.onImprovConnected(onImprovWiFiConnectedCb);
+
   Serial.begin(115200);
   while (!Serial) delay(10);
   Serial.println("\n=== ESP32 Smart Battery Monitor Started ===");
 
+
+  WiFi.begin();
+
+
   Wire.begin();
   Wire.setClock(50000);
 
-  setupWiFi();  // <--- New function
+  // setupWiFi();  // <--- New function
 
 
   Serial.println("\nWiFi Connected!");
   Serial.print("IP Address: http://");
-  Serial.println(WiFi.localIP());
+  // Serial.println(WiFi.localIP());
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", index_html);
@@ -516,10 +954,224 @@ void setup() {
     request->send(200, "application/json", getJSON());
   });
 
-  server.begin();
+  server.on("/advanced", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", advanced_html);
+  });
+// I2C Scanner endpoint
+server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
+  String result = "I2C Scanner Results:\n\n";
+  byte error;
+  int found = 0;
+  
+  for (uint8_t addr = 0x03; addr < 0x78; addr++) {
+    Wire.beginTransmission(addr);
+    error = Wire.endTransmission();
+    
+    if (error == 0) {
+      result += "Found device at 0x" + String(addr, HEX) + "\n";
+      found++;
+    }
+  }
+  
+  if (found == 0) result += "No I2C devices found.\nCheck wiring!";
+  else result += "\n" + String(found) + " device(s) found.";
+  
+  request->send(200, "text/plain", result);
+});
+
+server.on("/unseal", HTTP_GET, [](AsyncWebServerRequest *request) {
+  String response = "Invalid";
+
+  if (request->hasParam("addr") && request->hasParam("step")) {
+    uint8_t addr = request->getParam("addr")->value().toInt();
+    String step = request->getParam("step")->value();
+
+    uint16_t low, high;
+
+    if (step == "1") { low = 0x0414; high = 0x0414; }
+    else if (step == "2") { low = 0x3672; high = 0x3672; }
+    else if (step == "full") { low = 0xFFFF; high = 0xFFFF; }
+    else { response = "Unknown step"; request->send(200, "text/plain", response); return; }
+
+    // Write first word
+    Wire.beginTransmission(addr);
+    Wire.write(0x00);
+    Wire.write(lowByte(low));
+    Wire.write(highByte(low));
+    uint8_t err1 = Wire.endTransmission();
+    delay(100);
+
+    // Write second word
+    Wire.beginTransmission(addr);
+    Wire.write(0x00);
+    Wire.write(lowByte(high));
+    Wire.write(highByte(high));
+    uint8_t err2 = Wire.endTransmission();
+
+    if (err1 == 0 && err2 == 0) {
+      response = "Sent: 0x" + String(low, HEX) + " → 0x" + String(high, HEX);
+    } else {
+      response = "Write error: " + String(err1) + "/" + String(err2);
+    }
+  }
+
+  request->send(200, "text/plain", response);
+});
+
+server.on("/cmd", HTTP_GET, [](AsyncWebServerRequest *request) {
+  String response = "Invalid parameters";
+  
+  
+  if (request->hasParam("addr") && request->hasParam("command")) {
+    uint8_t addr = request->getParam("addr")->value().toInt();
+    uint8_t cmd = request->getParam("command")->value().toInt();
+    String type = request->hasParam("type") ? request->getParam("type")->value() : "word";
+
+  // Optional subcommand for ManufacturerAccess (0x00)
+    uint16_t subcmd = 0;
+    bool isManufAccess = (cmd == 0x00);
+    if (isManufAccess && request->hasParam("subcmd")) {
+      subcmd = strtol(request->getParam("subcmd")->value().c_str(), nullptr, 16);
+    }
+
+    if (i2cError) recoverI2C();
+
+    // === SAFETY: Block protected subcommands 0x1D - 0x2F ===
+    // if (type == "auto" && cmd >= 29 && cmd <= 48) {
+    //   response = "Protected 0x1D-0x2F range";
+    //   request->send(200, "text/plain", response);
+    //   return;
+    // }
+
+    // === CASE 1: Extended ManufacturerAccess with subcommand ===
+    if (isManufAccess && subcmd != 0) {
+      // Step 1: Write subcommand to ManufacturerAccess (0x00)
+      Wire.beginTransmission(addr);
+      Wire.write(0x00);
+      Wire.write(lowByte(subcmd));
+      Wire.write(highByte(subcmd));
+      uint8_t writeErr = Wire.endTransmission();
+      if (writeErr != 0) {
+        response = "MA Write error: " + String(writeErr);
+        request->send(200, "text/plain", response);
+        return;
+      }
+      delay(60);  // Critical: give gauge time to process (50-100ms typical)
+
+      // Step 2: Try reading word response directly from 0x00
+      Wire.beginTransmission(addr);
+      Wire.write(0x00);
+      if (Wire.endTransmission(false) == 0) {
+        if (Wire.requestFrom(addr, (uint8_t)2) == 2) {
+          uint16_t val = Wire.read() | (Wire.read() << 8);
+          char hexBuf[5];
+          sprintf(hexBuf, "%04X", val);
+          response = "MA Word Response (sub 0x" + String(subcmd, HEX) + "):\n0x" + String(hexBuf) + " (" + String(val) + ")";
+          request->send(200, "text/plain", response + ":using 0x00");
+          return;
+        }
+      }
+
+      // Step 3: Fallback - read block from ManufacturerData (0x23) or try general block
+      Wire.beginTransmission(addr);
+      Wire.write(0x23);  // Common: ManufacturerData
+      if (Wire.endTransmission(false) == 0) {
+        uint8_t len = Wire.requestFrom(addr, (uint8_t)33);
+        if (len > 0) {
+          uint8_t blockLen = Wire.read();
+          if (blockLen > 0 && blockLen <= 32) {
+            String hexDump = "";
+            String ascii = "";
+            for (uint8_t i = 0; i < blockLen; i++) {
+              uint8_t b = Wire.read();
+              char byteHex[3];
+              sprintf(byteHex, "%02X", b);
+              hexDump += String(byteHex) + " ";
+              ascii += (b >= 32 && b <= 126) ? (char)b : '.';
+            }
+            response = "MA Block Response (sub 0x" + String(subcmd, HEX) + "):\nLen: " + String(blockLen) +
+                       "\nHex: " + hexDump + "\nASCII: " + ascii;
+            request->send(200, "text/plain", response + ":using 0x23");
+            return;
+          }
+        }
+      }
+
+      response = "No response after MA subcmd 0x" + String(subcmd, HEX);
+      request->send(200, "text/plain", response);
+      return;
+    }
+
+
+    Wire.beginTransmission(addr);
+    Wire.write(cmd);
+    uint8_t err = Wire.endTransmission(false);
+
+    if (err != 0) {
+      response = "Transmission error: " + String(err);
+    } else {
+      // Try word read first
+      if (type == "word" || type == "auto") {
+        if (Wire.requestFrom(addr, (uint8_t)2) == 2) {
+          uint16_t val = Wire.read() | (Wire.read() << 8);
+          response = "Word Response: 0x" + String(val, HEX) + " (" + String(val) + ")";
+          request->send(200, "text/plain", response);
+          return;
+        }
+      }
+
+      // If word failed or block requested, try block
+      if (type == "block" || type == "auto") {
+        uint8_t len = Wire.requestFrom(addr, (uint8_t)33);
+        if (len > 0) {
+          uint8_t blockLen = Wire.read();
+          if (blockLen == 0 || blockLen > 32) {
+            response = "Invalid block length: " + String(blockLen);
+          } else {
+            String ascii = "";
+            String hexDump = "";
+            for (uint8_t i = 0; i < blockLen; i++) {
+              uint8_t b = Wire.read();
+              // Hex: 2-digit uppercase with space
+              char byteHex[3];
+              sprintf(byteHex, "%02X", b);
+              hexDump += String(byteHex) + " ";
+
+              // ASCII: printable or '.'
+              ascii += (b >= 32 && b <= 126) ? (char)b : '.';
+            }
+            // Trim trailing space in hex
+            hexDump.trim();
+
+            response = "Block Length: " + String(blockLen) +
+                      "\nHex: " + hexDump +
+                      "\nString: " + ascii;
+          }
+        } else {
+          response = "No block data received";
+        }
+      }
+    }
+  }
+  
+  request->send(200, "text/plain", response);
+});
+
+  // server.begin();
   Serial.println("Web server running. Open IP in browser and watch Serial for JSON logs.");
 }
 
+
 void loop() {
   // All handled asynchronously
+
+  improvSerial.handleSerial();
+    if (improvSerial.isConnected() && !serverStarted) {
+    
+    server.begin();
+    serverStarted = true;
+    
+    }
+
+
 }
