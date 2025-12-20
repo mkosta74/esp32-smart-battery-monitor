@@ -35,30 +35,33 @@ Common Battery connector pins
 
 
 Connect:
+--------
+
 - ESP32 GPIO21 (SDA) → Battery SDA pin
 - ESP32 GPIO22 (SCL) → Battery SCL pin
 - ESP32 GND → Battery GND pin
 
-Safety first: Test continuity, no shorts to power pins!
+![Wiring Diagram](images/wiring-diagram.png)
+
+**Safety first**: Test continuity, no shorts to power pins!
 
 **Warning**: Identify pins carefully! Wrong connection can damage BMS. Use multimeter/scope.
 
 ## Setup
-1. Install libraries: ESPAsyncWebServer, AsyncTCP (latest from GitHub by ESP32Async)
-2. Edit WiFi credentials in code
-3. Upload to ESP32
-4. Open Serial Monitor for IP and JSON logs
-5. Browse to IP for dashboard
 
-If no WiFi: Connect to "BatteryMonitor" hotspot (pw: 12345678), open 192.168.4.1
+Use online flashing tool (in Google Chrome or Microsoft Edge):
+
+https://mkosta74.github.io/esp32-smart-battery-monitor/
 
 ## Screenshots
-![Dashboard Example 1](images/Screenshot1.png)
-![Dashboard Example 2](images/Screenshot2.png)
+![Main Page](images/main-page.png)
+![Advanced Page](images/advanced-page.png)
 
 ## Notes
-- Individual cell voltages still not working (testing needed)
+- ~~Individual cell voltages still not working (testing needed)~~ Working!
 - Tested on: HSTNN-IB28, HSTNN-UB68, SS03XL
+- Advanced page with some scaning tools
+- unseal attempt, maybe...
 
 Enjoy your portable smart battery reader!
 
