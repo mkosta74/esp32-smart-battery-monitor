@@ -2,6 +2,7 @@
     "name": "ESP32 Smart Battery Monitor",
     "version": "1.0",
     "improv": true,
+    "new_install_prompt_erase": true,
     "builds":
     [
         {
