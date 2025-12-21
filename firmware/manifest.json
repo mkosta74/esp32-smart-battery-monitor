@@ -19,7 +19,7 @@
             "parts":
             [
                 {
-                    "path": "ESP32-C3-firmware.bin",
+                    "path": "ESP32C3_firmware.bin",
                     "offset": 0
                 }
             ]
