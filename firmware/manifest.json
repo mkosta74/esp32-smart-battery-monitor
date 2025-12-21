@@ -13,6 +13,17 @@
                     "offset": 0
                 }
             ]
+        },
+        {
+            "chipFamily": "ESP32-C3",
+            "parts":
+            [
+                {
+                    "path": "ESP32-C3-firmware.bin",
+                    "offset": 0
+                }
+            ]
         }
+        
     ]
 }
